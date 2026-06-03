@@ -1,0 +1,18 @@
+# Fichiers d'environnement Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Dossiers de données et d'entraînement (Trop lourds pour GitHub)
+dataset/
+Test_augmentation_*/
+kfold_run/
+
+# Fichiers de modèles et logs
+*.pth
+*.log
+metrics.json
+evaluation_metrics.txt
