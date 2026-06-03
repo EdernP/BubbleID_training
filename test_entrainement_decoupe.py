@@ -32,7 +32,7 @@ from detectron2.evaluation import COCOEvaluator, inference_on_dataset
 # Modify these values to tune your training run.
 
 # --- Nom du test en cours (à modifier avant chaque lancement) ---
-CURRENT_TEST_NAME = "Test_tot_1024x1024" # Ex: "baseline", "CLAHE", "GaussNoise", etc.
+CURRENT_TEST_NAME = "La_totale" # Ex: "baseline", "CLAHE", "GaussNoise", etc.
 
 # --- Paths Configuration ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__)) 
@@ -41,14 +41,15 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, f"Test_augmentation_{CURRENT_TEST_NAME}"
 
 N_SPLITS = 4
 RANDOM_STATE = 42
-MAX_ITER = 7000  # Doublé car le BATCH_SIZE a été divisé par 2
-LR = 0.00025 # Divisé par 2 (Règle de mise à l'échelle linéaire)
-BATCH_SIZE = 2  # Attention: avec des images 1024x1024, réduire à 2 si erreur "CUDA Out of Memory" (OOM)
-EVAL_PERIOD = 200  # Doublé pour garder la même fréquence d'évaluation par époque
+# Configuration par défaut pour des images en 800x800
+MAX_ITER = 7000      # Passer à 14000 pour BATCH_SIZE = 2 (1024x1024)
+LR = 0.0005          # Passer à 0.00025 pour BATCH_SIZE = 2 (1024x1024)
+BATCH_SIZE = 4       # Passer à 2 pour des images en 1024x1024
+EVAL_PERIOD = 200    # Passer à 400 pour 1024x1024
 CHECKPOINT_PERIOD = 200
 
 # --- Early Stopping Configuration ---
-EARLY_STOPPING_PATIENCE = 8  # Patience doublée car on évalue 2x plus souvent (6 * 200 = 1200 itérations de marge)
+EARLY_STOPPING_PATIENCE = 6  # 6 * 200 = 1200 itérations de marge (Passer à 8 pour 1024x1024)
 EARLY_STOPPING_METRIC = "bbox/AP" # Métrique à surveiller pour l'arrêt précoce.
 
 # --- Focal Loss Configuration ---
@@ -370,8 +371,12 @@ def custom_mapper_with_albumentations(dataset_dict):
     # 2. Define Albumentations pipeline for images and masks
     # Base transforms (toujours appliqués pour maintenir la géométrie requise)
     base_transforms = [
-        A.LongestMaxSize(max_size=1024),
-        A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=cv2.BORDER_CONSTANT, value=0),
+        # --- Pour 1024x1024 ---
+        #A.LongestMaxSize(max_size=1024),
+        #A.PadIfNeeded(min_height=1024, min_width=1024, border_mode=cv2.BORDER_CONSTANT, value=0),
+        # --- Pour 800x800 ---
+        A.LongestMaxSize(max_size=800),
+        A.PadIfNeeded(min_height=800, min_width=800, border_mode=cv2.BORDER_CONSTANT, value=0),
     ]
 
     # TEST DE LA PIPELINE COMBINÉE ULTIME
@@ -399,8 +404,9 @@ def custom_mapper_with_albumentations(dataset_dict):
         ], p=0.2),
         
         # 5. Occlusions (Indépendant)
-        # A.CoarseDropout(max_holes=8, max_height=32, max_width=32, fill_value=0, p=0.2), #valeurs standart
-        A.CoarseDropout(max_holes=8, max_height=113, max_width=158, fill_value=0, p=0.2),
+        # A.CoarseDropout(max_holes=8, max_height=32, max_width=32, fill_value=0, p=0.2), #valeurs standard
+        A.CoarseDropout(max_holes=8, max_height=88, max_width=123, fill_value=0, p=0.2), #800
+        #A.CoarseDropout(max_holes=8, max_height=113, max_width=158, fill_value=0, p=0.2), #1024
     ]
     transform = A.Compose(base_transforms + test_transform)
 
@@ -751,12 +757,13 @@ def main():
         
         # Une descente du Learning Rate en "escalier" plus douce
         cfg.SOLVER.LR_SCHEDULER_NAME = "WarmupMultiStepLR"
-        cfg.SOLVER.STEPS = (10000, 12000) # Adapté au nouveau MAX_ITER
+        cfg.SOLVER.STEPS = (5000, 6000) # BATCH_SIZE = 4
+        #cfg.SOLVER.STEPS = (10000, 12000) # BATCH_SIZE = 2
         cfg.SOLVER.GAMMA = 0.333 # Divise RÉELLEMENT le LR par 3 à chaque palier (freinage doux)
         
         # --- Configuration explicite du Warmup ---
-        cfg.SOLVER.WARMUP_ITERS = 2000          # Doublé car BATCH_SIZE divisé par 2
-        cfg.SOLVER.WARMUP_FACTOR = 1.0 / 2000   # Facteur initial
+        cfg.SOLVER.WARMUP_ITERS = 1000          # 2000 si BATCH_SIZE = 2
+        cfg.SOLVER.WARMUP_FACTOR = 1.0 / 1000   # 1.0 / 2000 si BATCH_SIZE = 2
         cfg.SOLVER.WARMUP_METHOD = "linear"     # Montée linéaire (linéaire, constante ou step)
         cfg.SOLVER.CHECKPOINT_PERIOD = CHECKPOINT_PERIOD
         cfg.SOLVER.AMP.ENABLED = True
@@ -793,11 +800,11 @@ def main():
         cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[0.51, 0.89, 1.21]] #obtenu avec analyse_taille
         
         # CORRECTION : Une liste par niveau de FPN (5 niveaux) pour capturer les micro-bulles
-        #cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16], [32], [64], [128], [256]] #meilleur pour petites bulles
-        # Si 'analyse_taille' a été fait sur des images 1024x1024, gardez ces valeurs (elles sont optimisées pour 1024). 
-        # S'il a été fait sur des images de 800x800, décommentez et testez plutôt la ligne multipliée par ~1.28 :
-        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[31], [83], [132], [219], [330]]
-        #cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[24], [65], [103], [171], [258]] # obtenu avec analyse_taille
+        # --- Configuration pour 1024x1024 ---
+        #cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[31], [83], [132], [219], [330]]
+        
+        # --- Configuration pour 800x800 ---
+        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[24], [65], [103], [171], [258]] # obtenu avec analyse_taille
 
         cfg.TEST.EVAL_PERIOD = EVAL_PERIOD
 
