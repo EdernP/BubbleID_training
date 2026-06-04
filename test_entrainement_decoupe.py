@@ -32,14 +32,14 @@ from detectron2.evaluation import COCOEvaluator, inference_on_dataset
 # Modify these values to tune your training run.
 
 # --- Nom du test en cours (à modifier avant chaque lancement) ---
-CURRENT_TEST_NAME = "La_totale" # Ex: "baseline", "CLAHE", "GaussNoise", etc.
+CURRENT_TEST_NAME = "final" # Ex: "baseline", "CLAHE", "GaussNoise", etc.
 
 # --- Paths Configuration ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__)) 
 DATASET_PATH = os.path.join(PROJECT_ROOT, "dataset")
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, f"Test_augmentation_{CURRENT_TEST_NAME}")
 
-N_SPLITS = 4
+N_SPLITS = 5
 RANDOM_STATE = 42
 # Configuration par défaut pour des images en 800x800
 MAX_ITER = 7000      # Passer à 14000 pour BATCH_SIZE = 2 (1024x1024)
@@ -49,7 +49,7 @@ EVAL_PERIOD = 200    # Passer à 400 pour 1024x1024
 CHECKPOINT_PERIOD = 200
 
 # --- Early Stopping Configuration ---
-EARLY_STOPPING_PATIENCE = 6  # 6 * 200 = 1200 itérations de marge (Passer à 8 pour 1024x1024)
+EARLY_STOPPING_PATIENCE = 8  # 6 * 200 = 1200 itérations de marge (Passer à 8 pour 1024x1024)
 EARLY_STOPPING_METRIC = "bbox/AP" # Métrique à surveiller pour l'arrêt précoce.
 
 # --- Focal Loss Configuration ---
@@ -553,8 +553,8 @@ class FocalFastRCNNOutputLayers(FastRCNNOutputLayers):
 
         # Poids par classe (à adapter selon vos fréquences). 
         # Ordre : [detached (0), occludedAttached (1), attached (2)]
-        # Ici, on donne un poids 3x plus fort à 'detached'.
-        self.class_weights = [3.0, 1.0, 1.0]
+        # Ici, on donne un poids 3x plus fort à 'occludedAttached'.
+        self.class_weights = [1.0, 3.0, 1.0]
 
     def losses(self, predictions, proposals):
         """ Remplace la Cross-Entropy standard par la Sigmoid Focal Loss """
@@ -704,10 +704,6 @@ def main():
         logger.warning("Some images have no categories. Stratification might be suboptimal.")
 
     for fold, (train_idx, val_idx) in enumerate(skf.split(np.zeros(len(all_dataset_dicts)), stratify_categories)):
-        # Condition pour ne lancer que le fold 4, comme demandé.
-        # Parfait pour tester rapidement et itérativement des augmentations.
-        if (fold + 1) != 4:
-            continue
 
         fold_output_dir = os.path.join(OUTPUT_DIR, f"fold_{fold + 1}")
         os.makedirs(fold_output_dir, exist_ok=True)
@@ -747,7 +743,7 @@ def main():
         
         cfg.DATASETS.TRAIN = (train_dataset_name,)
         cfg.DATASETS.TEST = (val_dataset_name,)
-        cfg.DATALOADER.NUM_WORKERS = 8 # Augmenté pour accélérer les augmentations Albumentations sur le processeur
+        cfg.DATALOADER.NUM_WORKERS = 4 # Augmenté pour accélérer les augmentations Albumentations sur le processeur
         
         cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(MODEL_YAML)
         
@@ -766,6 +762,7 @@ def main():
         cfg.SOLVER.WARMUP_FACTOR = 1.0 / 1000   # 1.0 / 2000 si BATCH_SIZE = 2
         cfg.SOLVER.WARMUP_METHOD = "linear"     # Montée linéaire (linéaire, constante ou step)
         cfg.SOLVER.CHECKPOINT_PERIOD = CHECKPOINT_PERIOD
+        cfg.SOLVER.MAX_TO_KEEP = 1              # Ne conserve que le checkpoint le plus récent (en plus de model_best.pth)
         cfg.SOLVER.AMP.ENABLED = True
         
         cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512
